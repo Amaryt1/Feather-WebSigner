@@ -51,29 +51,35 @@ function setLabel(selector, file) {
 }
 
 function refreshButton() {
-  const ready = wasmReady && !!p12Bytes && !!provBytes && !!ipaFile && !!passwordInput?.value;
-  if (signButton) signButton.disabled = !ready;
+  if (!signButton) return;
+  signButton.disabled = !(wasmReady && p12Bytes && provBytes && ipaFile && ipaInfo && passwordInput?.value);
 }
 
 async function ensureWasm() {
-  if (wasmReady) return;
+  if (wasmReady) return true;
   if (wasmPromise) return wasmPromise;
   wasmPromise = (async () => {
-    engineStatus.textContent = "جاري تحميل محرك التوقيع…";
+    if (engineStatus) engineStatus.textContent = "جاري تحميل محرك التوقيع…";
     try {
-      const response = await fetch(wasmUrl, { cache: "force-cache" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const response = await fetch(wasmUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error(`تعذر تحميل محرك WASM (HTTP ${response.status})`);
       const bytes = await response.arrayBuffer();
       await initWasm({ module_or_path: bytes });
       wasmReady = true;
-      engineStatus.textContent = "المحرك جاهز • التوقيع محليًا";
-      engineStatus.dataset.state = "ready";
+      if (engineStatus) {
+        engineStatus.textContent = "المحرك جاهز • التوقيع محليًا";
+        engineStatus.dataset.state = "ready";
+      }
       log("تم تحميل محرك WASM بنجاح.", "ok");
       refreshButton();
+      return true;
     } catch (error) {
+      wasmReady = false;
       wasmPromise = null;
-      engineStatus.textContent = "تعذر تحميل محرك التوقيع";
-      engineStatus.dataset.state = "error";
+      if (engineStatus) {
+        engineStatus.textContent = "تعذر تحميل محرك التوقيع";
+        engineStatus.dataset.state = "error";
+      }
       log(`خطأ في WASM: ${error?.message || error}`, "error");
       throw error;
     }
@@ -81,8 +87,9 @@ async function ensureWasm() {
   return wasmPromise;
 }
 
-function bytesOf(file) {
-  return file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+async function readFile(file) {
+  if (!file) throw new Error("لم يتم اختيار ملف.");
+  return new Uint8Array(await file.arrayBuffer());
 }
 
 function isMachO(data) {
@@ -117,7 +124,7 @@ function extensionPrefixes(files, appPrefix) {
 
 async function inspectIPA(file) {
   await ensureWasm();
-  const files = unzipSync(await bytesOf(file));
+  const files = unzipSync(await readFile(file));
   const appPrefix = findApp(files);
   const plistPath = `${appPrefix}Info.plist`;
   const plistData = files[plistPath];
@@ -127,14 +134,17 @@ async function inspectIPA(file) {
   if (!bundleId) throw new Error("لم يتم العثور على Bundle ID.");
   if (!executable) throw new Error("لم يتم العثور على اسم الملف التنفيذي.");
   const execPath = `${appPrefix}${executable}`;
-  if (!files[execPath] || !isMachO(files[execPath])) {
-    throw new Error(`الملف التنفيذي غير صالح أو غير موجود: ${executable}`);
-  }
+  if (!files[execPath] || !isMachO(files[execPath])) throw new Error(`الملف التنفيذي غير صالح أو غير موجود: ${executable}`);
   const extensions = extensionPrefixes(files, appPrefix);
   ipaInfo = { files, appPrefix, plistPath, plistData, info, bundleId, executable, execPath, extensions };
-  $("#bundleId").value = bundleId;
+  const bundleField = $("#bundleId");
+  if (bundleField) {
+    bundleField.value = bundleId;
+    bundleField.readOnly = true;
+    bundleField.title = "يُستخدم Bundle ID الأصلي للـIPA لتجنب إفساد التوقيع.";
+  }
   if (extensions.length) {
-    log(`تم اكتشاف ${extensions.length} App Extension. يجب توفير Provisioning مطابق لكل Extension؛ لن يتم إنشاء IPA غير صالحة.`, "error");
+    log(`تم اكتشاف ${extensions.length} App Extension؛ يلزم Provisioning مستقل لكل Extension.`, "error");
   } else {
     log(`تم فحص IPA بنجاح • ${bundleId} • ${size(file.size)}`, "ok");
   }
@@ -142,37 +152,44 @@ async function inspectIPA(file) {
 }
 
 async function handleP12(file) {
+  if (!file) return;
   try {
-    p12Bytes = await bytesOf(file);
+    p12Bytes = await readFile(file);
     setLabel("#p12name", file);
     clearDownload();
-    log("تم اختيار P12 وحفظه في ذاكرة المتصفح فقط؛ لم يتم رفعه إلى الخادم.", "ok");
+    log(`تم اختيار ${file.name} • ${size(file.size)} • محلي فقط.`, "ok");
   } catch (error) {
     p12Bytes = null;
+    setLabel("#p12name", null);
     log(`تعذر قراءة P12: ${error?.message || error}`, "error");
   }
   refreshButton();
 }
 
 async function handleProvision(file) {
+  if (!file) return;
   try {
-    provBytes = await bytesOf(file);
+    provBytes = await readFile(file);
     setLabel("#provname", file);
-    $("#provMeta").textContent = `تم تحميل ${file.name} • ${size(file.size)} • محلي فقط`;
+    const meta = $("#provMeta");
+    if (meta) meta.textContent = `تم تحميل ${file.name} • ${size(file.size)} • محلي فقط`;
     clearDownload();
-    log("تم اختيار MobileProvision وحفظه في ذاكرة المتصفح فقط.", "ok");
+    log(`تم اختيار ${file.name} • ${size(file.size)} • محلي فقط.`, "ok");
   } catch (error) {
     provBytes = null;
+    setLabel("#provname", null);
     log(`تعذر قراءة MobileProvision: ${error?.message || error}`, "error");
   }
   refreshButton();
 }
 
 async function handleIPA(file) {
+  if (!file) return;
   ipaFile = file;
   setLabel("#ipaname", file);
   clearDownload();
   progress(0);
+  log(`تم اختيار ${file.name} • جاري الفحص…`);
   try {
     await inspectIPA(file);
   } catch (error) {
@@ -180,6 +197,14 @@ async function handleIPA(file) {
     log(`فشل فحص IPA: ${error?.message || error}`, "error");
   }
   refreshButton();
+}
+
+function bindFileInput(input, handler) {
+  if (!input) return;
+  input.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (file) await handler(file);
+  });
 }
 
 function enableDrop(label, handler) {
@@ -198,24 +223,13 @@ function enableDrop(label, handler) {
   });
 }
 
-p12Input?.addEventListener("change", () => {
-  const file = p12Input.files?.[0];
-  if (file) handleP12(file);
-});
-provInput?.addEventListener("change", () => {
-  const file = provInput.files?.[0];
-  if (file) handleProvision(file);
-});
-ipaInput?.addEventListener("change", () => {
-  const file = ipaInput.files?.[0];
-  if (file) handleIPA(file);
-});
+bindFileInput(p12Input, handleP12);
+bindFileInput(provInput, handleProvision);
+bindFileInput(ipaInput, handleIPA);
 passwordInput?.addEventListener("input", refreshButton);
-$("#bundleId")?.addEventListener("input", refreshButton);
-
-enableDrop(p12Input?.closest(".drop"), handleP12);
-enableDrop(provInput?.closest(".drop"), handleProvision);
-enableDrop(ipaInput?.closest(".drop"), handleIPA);
+enableDrop(p12Input?.closest("label.drop"), handleP12);
+enableDrop(provInput?.closest("label.drop"), handleProvision);
+enableDrop(ipaInput?.closest("label.drop"), handleIPA);
 
 signButton?.addEventListener("click", async () => {
   signButton.disabled = true;
@@ -224,22 +238,21 @@ signButton?.addEventListener("click", async () => {
   try {
     await ensureWasm();
     if (!p12Bytes || !provBytes || !ipaFile) throw new Error("اختر P12 وMobileProvision وIPA أولًا.");
-    if (!passwordInput.value) throw new Error("أدخل كلمة مرور P12.");
+    if (!passwordInput?.value) throw new Error("أدخل كلمة مرور P12.");
     if (!ipaInfo) await inspectIPA(ipaFile);
 
     const { files, appPrefix, plistData, executable, execPath, extensions } = ipaInfo;
-    if (extensions.length) throw new Error("IPA تحتوي App Extensions. هذه النسخة تمنع إنتاج IPA غير صالحة؛ استخدم Provisioning مستقلًا لكل Extension.");
+    if (extensions.length) throw new Error("IPA تحتوي App Extensions. استخدم Provisioning مطابقًا لكل Extension.");
 
-    log("جاري التحقق من الشهادة وملف Provisioning…");
+    log("جاري التحقق من الشهادة وProvisioning…");
     const signer = new WasmSigner(p12Bytes, passwordInput.value, provBytes);
     const teamId = signer.team_id();
     if (!teamId) throw new Error("تعذر استخراج Team ID. تحقق من P12 وProvisioning وكلمة المرور.");
     log(`بيانات التوقيع صالحة • Team ID: ${teamId}`, "ok");
     progress(12);
 
-    const bundleId = $("#bundleId").value.trim() || ipaInfo.bundleId;
+    const bundleId = ipaInfo.bundleId;
     const output = { ...files };
-
     for (const path of Object.keys(output)) {
       if (path.startsWith(`${appPrefix}_CodeSignature/`)) delete output[path];
     }
@@ -254,22 +267,15 @@ signButton?.addEventListener("click", async () => {
       if (isMachO(data)) nested.push(path);
     }
 
-    if (nested.length) {
-      log(`جاري توقيع ${nested.length} ملفًا داخليًا…`);
-      for (let i = 0; i < nested.length; i++) {
-        const path = nested[i];
-        const leaf = path.split("/").pop();
-        const identifier = leaf.replace(/\.dylib$/i, "");
-        try {
-          output[path] = signer.sign_macho_fat(files[path], identifier, null, null);
-        } catch (error) {
-          throw new Error(`فشل توقيع ${path}: ${error?.message || error}`);
-        }
-        progress(15 + ((i + 1) / nested.length) * 30);
-      }
+    for (let i = 0; i < nested.length; i++) {
+      const path = nested[i];
+      const leaf = path.split("/").pop();
+      const identifier = leaf.replace(/\.dylib$/i, "");
+      output[path] = signer.sign_macho_fat(files[path], identifier, null, null);
+      progress(15 + ((i + 1) / Math.max(nested.length, 1)) * 30);
     }
 
-    log("جاري حساب CodeResources من الملفات النهائية…");
+    log("جاري بناء CodeResources…");
     const resources = Object.keys(output).filter((path) => {
       if (!path.startsWith(appPrefix)) return false;
       if (path === execPath) return false;
@@ -281,7 +287,6 @@ signButton?.addEventListener("click", async () => {
       signer.hash_file(path.slice(appPrefix.length), output[path]);
       if (i % 20 === 0) progress(45 + (i / Math.max(resources.length, 1)) * 18);
     }
-
     const codeResources = signer.build_code_resources();
     output[`${appPrefix}_CodeSignature/CodeResources`] = codeResources;
     progress(68);
@@ -293,13 +298,14 @@ signButton?.addEventListener("click", async () => {
     log("جاري إنشاء IPA النهائية…");
     const archive = zipSync(output, { level: 6 });
     outputUrl = URL.createObjectURL(new Blob([archive], { type: "application/octet-stream" }));
-    const baseName = ($( "#outputName")?.value.trim() || `${ipaFile.name.replace(/\.ipa$/i, "")}-signed`).replace(/\.ipa$/i, "");
+    const rawName = $("#outputName")?.value.trim() || `${ipaFile.name.replace(/\.ipa$/i, "")}-signed`;
+    const baseName = rawName.replace(/\.ipa$/i, "");
     download.href = outputUrl;
     download.download = `${baseName}.ipa`;
     download.textContent = `تنزيل ${baseName}.ipa • ${size(archive.length)}`;
     download.classList.remove("hidden");
     progress(100);
-    log("اكتمل التوقيع بنجاح. لم يتم رفع P12 أو Provisioning أو IPA إلى خادم.", "ok");
+    log("اكتمل التوقيع بنجاح. الملفات لم تُرفع إلى خادم.", "ok");
   } catch (error) {
     console.error(error);
     progress(0);

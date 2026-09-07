@@ -4,8 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#07111f">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Feather WebSigner</title>
-  <link rel="stylesheet" href="./src/style.css">
+  <link rel="stylesheet" href="./src/style.css?v=202609071">
 </head>
 <body>
   <div class="bg"></div>
@@ -21,10 +24,10 @@
     <section class="grid">
       <article class="card"><h2>1. شهادة P12</h2><label class="drop"><input id="p12" type="file" accept=".p12,.pfx"><span>اختر ملف P12</span><small id="p12name">لم يتم اختيار ملف</small></label><input id="password" type="password" placeholder="كلمة مرور P12"></article>
       <article class="card"><h2>2. MobileProvision</h2><label class="drop"><input id="prov" type="file" accept=".mobileprovision"><span>اختر ملف MobileProvision</span><small id="provname">لم يتم اختيار ملف</small></label><div class="meta" id="provMeta">ستظهر بيانات الملف هنا.</div></article>
-      <article class="card wide"><h2>3. IPA</h2><label class="drop big"><input id="ipa" type="file" accept=".ipa"><span>اختر ملف IPA المراد توقيعه</span><small id="ipaname">لم يتم اختيار ملف</small></label><div class="options"><label>Bundle ID اختياري <input id="bundleId" placeholder="اتركه فارغًا لاستخدام الموجود"></label><label>اسم الناتج <input id="outputName" value="signed.ipa"></label></div><button id="sign" disabled>بدء التوقيع محليًا</button><div class="progress"><i id="bar"></i></div><div id="log" class="log">جاهز.</div><a id="download" class="download hidden">تنزيل IPA الموقعة</a></article>
+      <article class="card wide"><h2>3. IPA</h2><label class="drop big"><input id="ipa" type="file" accept=".ipa"><span>اختر ملف IPA المراد توقيعه</span><small id="ipaname">لم يتم اختيار ملف</small></label><div class="options"><label>Bundle ID <input id="bundleId" placeholder="يُقرأ تلقائيًا من IPA" readonly></label><label>اسم الناتج <input id="outputName" value="signed.ipa"></label></div><button id="sign" disabled>بدء التوقيع محليًا</button><div class="progress"><i id="bar"></i></div><div id="log" class="log">جاهز.</div><a id="download" class="download hidden">تنزيل IPA الموقعة</a></article>
     </section>
     <section class="card notes"><h2>ملاحظات مهمة</h2><ul><li>استخدم فقط شهادات وملفات provisioning المملوكة لك أو المصرح لك باستخدامها.</li><li>نجاح التوقيع لا يعني تجاوز قيود Apple؛ يجب أن يكون الـProvision مناسبًا للجهاز والـBundle ID.</li><li>التثبيت المباشر عبر <code>itms-services</code> يحتاج ملف manifest مستضافًا عبر HTTPS.</li></ul></section>
   </main>
-  <script type="module" src="./src/main.js"></script>
+  <script type="module" src="./src/main.js?v=202609071"></script>
 </body>
 </html>

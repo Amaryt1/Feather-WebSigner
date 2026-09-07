@@ -2,95 +2,87 @@ import initWasm, { WasmSigner } from "@jveko/zsign-wasm";
 import wasmUrl from "@jveko/zsign-wasm/zsign_wasm_bg.wasm?url";
 import { unzipSync, zipSync } from "fflate";
 
-const $ = (selector) => document.querySelector(selector);
-
+const $ = (s) => document.querySelector(s);
 const p12Input = $("#p12");
-const profileInput = $("#prov");
+const provInput = $("#prov");
 const ipaInput = $("#ipa");
 const passwordInput = $("#password");
 const signButton = $("#sign");
-const logElement = $("#log");
-const progressBar = $("#bar");
-const downloadLink = $("#download");
+const logEl = $("#log");
+const bar = $("#bar");
+const download = $("#download");
 const engineStatus = $("#engineStatus");
 
-let wasmReady = false;
-let wasmInitPromise = null;
 let p12Bytes = null;
-let profileBytes = null;
+let provBytes = null;
 let ipaFile = null;
-let outputUrl = null;
 let ipaInfo = null;
+let wasmReady = false;
+let wasmPromise = null;
+let outputUrl = null;
 
-function formatSize(bytes) {
+function size(bytes) {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
-function setProgress(value) {
-  progressBar.style.width = `${Math.max(0, Math.min(100, value))}%`;
+function progress(value) {
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, value))}%`;
 }
 
-function log(message, type = "info") {
-  const prefix = type === "ok" ? "✓" : type === "error" ? "✕" : "•";
-  logElement.textContent = `${prefix} ${message}`;
+function log(message, kind = "info") {
+  if (!logEl) return;
+  const icon = kind === "ok" ? "✓" : kind === "error" ? "✕" : "•";
+  logEl.textContent = `${icon} ${message}`;
 }
 
 function clearDownload() {
-  if (outputUrl) {
-    URL.revokeObjectURL(outputUrl);
-    outputUrl = null;
-  }
-  downloadLink.classList.add("hidden");
-  downloadLink.removeAttribute("href");
+  if (outputUrl) URL.revokeObjectURL(outputUrl);
+  outputUrl = null;
+  download?.classList.add("hidden");
+  download?.removeAttribute("href");
 }
 
-function updateReadiness() {
-  const ready = wasmReady && p12Bytes && profileBytes && ipaFile && passwordInput.value.length > 0;
-  signButton.disabled = !ready;
-  signButton.title = ready
-    ? "ابدأ توقيع IPA محليًا"
-    : "اختر P12 وMobileProvision وIPA وأدخل كلمة مرور P12 بعد تحميل المحرك";
+function setLabel(selector, file) {
+  const el = $(selector);
+  if (el) el.textContent = file ? `${file.name} • ${size(file.size)}` : "لم يتم اختيار ملف";
 }
 
-async function initWasm() {
+function refreshButton() {
+  const ready = wasmReady && !!p12Bytes && !!provBytes && !!ipaFile && !!passwordInput?.value;
+  if (signButton) signButton.disabled = !ready;
+}
+
+async function ensureWasm() {
   if (wasmReady) return;
-  if (wasmInitPromise) return wasmInitPromise;
-
-  wasmInitPromise = (async () => {
+  if (wasmPromise) return wasmPromise;
+  wasmPromise = (async () => {
     engineStatus.textContent = "جاري تحميل محرك التوقيع…";
     try {
       const response = await fetch(wasmUrl, { cache: "force-cache" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const wasmBytes = await response.arrayBuffer();
-      await initWasm({ module_or_path: wasmBytes });
+      const bytes = await response.arrayBuffer();
+      await initWasm({ module_or_path: bytes });
       wasmReady = true;
       engineStatus.textContent = "المحرك جاهز • التوقيع محليًا";
       engineStatus.dataset.state = "ready";
-      updateReadiness();
-      log("محرك WASM جاهز للعمل.", "ok");
+      log("تم تحميل محرك WASM بنجاح.", "ok");
+      refreshButton();
     } catch (error) {
-      wasmInitPromise = null;
+      wasmPromise = null;
       engineStatus.textContent = "تعذر تحميل محرك التوقيع";
       engineStatus.dataset.state = "error";
-      log(`تعذر تحميل WASM: ${error?.message || error}`, "error");
+      log(`خطأ في WASM: ${error?.message || error}`, "error");
       throw error;
     }
   })();
-
-  return wasmInitPromise;
+  return wasmPromise;
 }
 
-function readAsBytes(file) {
+function bytesOf(file) {
   return file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
-}
-
-function setFileLabel(id, file) {
-  const element = $(id);
-  if (!element) return;
-  element.textContent = file ? `${file.name} • ${formatSize(file.size)}` : "لم يتم اختيار ملف";
 }
 
 function isMachO(data) {
@@ -99,266 +91,222 @@ function isMachO(data) {
   return [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca].includes(magic);
 }
 
-function parseInfoPlist(data) {
-  if (!wasmReady) throw new Error("محرك WASM غير جاهز لقراءة Info.plist.");
+function findApp(files) {
+  const plistPath = Object.keys(files).find((p) => /^Payload\/[^/]+\.app\/Info\.plist$/.test(p));
+  if (!plistPath) throw new Error("لم يتم العثور على Payload/*.app/Info.plist داخل IPA.");
+  return plistPath.slice(0, -"Info.plist".length);
+}
+
+function parseInfo(data) {
   const info = WasmSigner.parse_info_plist(data);
   if (!info) throw new Error("تعذر قراءة Info.plist.");
   return info;
 }
 
-function findMainApp(files) {
-  const paths = Object.keys(files);
-  const appPath = paths.find((path) => /^Payload\/[^/]+\.app\/Info\.plist$/.test(path));
-  if (!appPath) throw new Error("لم يتم العثور على Payload/*.app/Info.plist داخل IPA.");
-  return appPath.slice(0, appPath.lastIndexOf("Info.plist"));
-}
-
-function findNestedAppExtensions(files, appPrefix) {
-  const prefixes = new Set();
-  const marker = `${appPrefix}PlugIns/`;
+function extensionPrefixes(files, appPrefix) {
+  const result = new Set();
+  const root = `${appPrefix}PlugIns/`;
   for (const path of Object.keys(files)) {
-    if (!path.startsWith(marker)) continue;
-    const match = path.match(new RegExp(`^${escapeRegExp(marker)}([^/]+\\.appex)/`));
-    if (match) prefixes.add(`${marker}${match[1]}/`);
+    if (!path.startsWith(root)) continue;
+    const rest = path.slice(root.length);
+    const first = rest.split("/")[0];
+    if (first.endsWith(".appex")) result.add(`${root}${first}/`);
   }
-  return [...prefixes];
+  return [...result];
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-async function inspectIpa(file) {
-  await initWasm();
-  const files = unzipSync(await readAsBytes(file));
-  const appPrefix = findMainApp(files);
+async function inspectIPA(file) {
+  await ensureWasm();
+  const files = unzipSync(await bytesOf(file));
+  const appPrefix = findApp(files);
   const plistPath = `${appPrefix}Info.plist`;
-  const infoPlist = files[plistPath];
-  if (!infoPlist) throw new Error("Info.plist غير موجود.");
-
-  const info = parseInfoPlist(infoPlist);
+  const plistData = files[plistPath];
+  const info = parseInfo(plistData);
   const bundleId = info.bundle_id || info.CFBundleIdentifier || "";
   const executable = info.executable || info.CFBundleExecutable || "";
-  if (!bundleId) throw new Error("تعذر استخراج Bundle ID من Info.plist.");
-  if (!executable) throw new Error("تعذر استخراج اسم الملف التنفيذي من Info.plist.");
-
+  if (!bundleId) throw new Error("لم يتم العثور على Bundle ID.");
+  if (!executable) throw new Error("لم يتم العثور على اسم الملف التنفيذي.");
   const execPath = `${appPrefix}${executable}`;
   if (!files[execPath] || !isMachO(files[execPath])) {
-    throw new Error(`الملف التنفيذي الرئيسي غير موجود أو ليس Mach-O: ${executable}`);
+    throw new Error(`الملف التنفيذي غير صالح أو غير موجود: ${executable}`);
   }
-
-  const nestedApps = findNestedAppExtensions(files, appPrefix);
-  ipaInfo = { files, appPrefix, plistPath, infoPlist, info, bundleId, executable, execPath, nestedApps };
+  const extensions = extensionPrefixes(files, appPrefix);
+  ipaInfo = { files, appPrefix, plistPath, plistData, info, bundleId, executable, execPath, extensions };
   $("#bundleId").value = bundleId;
-
-  if (nestedApps.length) {
-    log(`تم اكتشاف ${nestedApps.length} App Extension. يلزم Provisioning مستقل لكل Extension؛ لن يتم إنشاء IPA غير صالحة.`, "error");
+  if (extensions.length) {
+    log(`تم اكتشاف ${extensions.length} App Extension. يجب توفير Provisioning مطابق لكل Extension؛ لن يتم إنشاء IPA غير صالحة.`, "error");
   } else {
-    log(`تم فحص IPA: ${bundleId} • ${formatSize(file.size)}`, "ok");
+    log(`تم فحص IPA بنجاح • ${bundleId} • ${size(file.size)}`, "ok");
   }
-  updateReadiness();
+  refreshButton();
 }
 
 async function handleP12(file) {
-  p12Bytes = await readAsBytes(file);
-  setFileLabel("#p12name", file);
-  clearDownload();
-  log("تم تحميل P12 إلى ذاكرة المتصفح فقط؛ لم يتم رفعه إلى الموقع.", "ok");
-  updateReadiness();
-}
-
-async function handleProfile(file) {
-  profileBytes = await readAsBytes(file);
-  setFileLabel("#provname", file);
-  clearDownload();
   try {
-    await initWasm();
-    const signer = new WasmSigner(p12Bytes || new Uint8Array(), passwordInput.value || "", profileBytes);
-    const team = signer.team_id();
-    $("#provMeta").textContent = team ? `تم تحميل الملف محليًا • Team ID: ${team}` : "تم تحميل الملف محليًا.";
-  } catch (_) {
-    $("#provMeta").textContent = "تم تحميل الملف محليًا. سيتم التحقق منه عند بدء التوقيع.";
+    p12Bytes = await bytesOf(file);
+    setLabel("#p12name", file);
+    clearDownload();
+    log("تم اختيار P12 وحفظه في ذاكرة المتصفح فقط؛ لم يتم رفعه إلى الخادم.", "ok");
+  } catch (error) {
+    p12Bytes = null;
+    log(`تعذر قراءة P12: ${error?.message || error}`, "error");
   }
-  log("تم تحميل MobileProvision إلى ذاكرة المتصفح فقط.", "ok");
-  updateReadiness();
+  refreshButton();
 }
 
-async function handleIpa(file) {
-  if (!file) return;
-  ipaFile = file;
-  setFileLabel("#ipaname", file);
-  clearDownload();
-  setProgress(0);
+async function handleProvision(file) {
   try {
-    await inspectIpa(file);
+    provBytes = await bytesOf(file);
+    setLabel("#provname", file);
+    $("#provMeta").textContent = `تم تحميل ${file.name} • ${size(file.size)} • محلي فقط`;
+    clearDownload();
+    log("تم اختيار MobileProvision وحفظه في ذاكرة المتصفح فقط.", "ok");
+  } catch (error) {
+    provBytes = null;
+    log(`تعذر قراءة MobileProvision: ${error?.message || error}`, "error");
+  }
+  refreshButton();
+}
+
+async function handleIPA(file) {
+  ipaFile = file;
+  setLabel("#ipaname", file);
+  clearDownload();
+  progress(0);
+  try {
+    await inspectIPA(file);
   } catch (error) {
     ipaInfo = null;
-    log(`فحص IPA فشل: ${error?.message || error}`, "error");
+    log(`فشل فحص IPA: ${error?.message || error}`, "error");
   }
-  updateReadiness();
+  refreshButton();
 }
 
-function attachDrop(labelSelector, input, handler) {
-  const label = input.closest(labelSelector);
+function enableDrop(label, handler) {
   if (!label) return;
-  ["dragenter", "dragover"].forEach((eventName) => {
-    label.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      label.classList.add("dragging");
-    });
-  });
-  ["dragleave", "drop"].forEach((eventName) => {
-    label.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      label.classList.remove("dragging");
-    });
-  });
+  ["dragenter", "dragover"].forEach((name) => label.addEventListener(name, (event) => {
+    event.preventDefault();
+    label.classList.add("dragging");
+  }));
+  ["dragleave", "drop"].forEach((name) => label.addEventListener(name, (event) => {
+    event.preventDefault();
+    label.classList.remove("dragging");
+  }));
   label.addEventListener("drop", async (event) => {
     const file = event.dataTransfer?.files?.[0];
     if (file) await handler(file);
   });
 }
 
-p12Input.addEventListener("change", async () => {
+p12Input?.addEventListener("change", () => {
   const file = p12Input.files?.[0];
-  if (file) await handleP12(file);
+  if (file) handleP12(file);
 });
-
-profileInput.addEventListener("change", async () => {
-  const file = profileInput.files?.[0];
-  if (file) await handleProfile(file);
+provInput?.addEventListener("change", () => {
+  const file = provInput.files?.[0];
+  if (file) handleProvision(file);
 });
-
-ipaInput.addEventListener("change", async () => {
+ipaInput?.addEventListener("change", () => {
   const file = ipaInput.files?.[0];
-  if (file) await handleIpa(file);
+  if (file) handleIPA(file);
 });
+passwordInput?.addEventListener("input", refreshButton);
+$("#bundleId")?.addEventListener("input", refreshButton);
 
-passwordInput.addEventListener("input", updateReadiness);
-$("#bundleId").addEventListener("input", updateReadiness);
+enableDrop(p12Input?.closest(".drop"), handleP12);
+enableDrop(provInput?.closest(".drop"), handleProvision);
+enableDrop(ipaInput?.closest(".drop"), handleIPA);
 
-attachDrop(".drop", p12Input, handleP12);
-attachDrop(".drop", profileInput, handleProfile);
-attachDrop(".drop", ipaInput, handleIpa);
-
-signButton.addEventListener("click", async () => {
+signButton?.addEventListener("click", async () => {
   signButton.disabled = true;
   clearDownload();
-  setProgress(3);
-
+  progress(2);
   try {
-    await initWasm();
-    if (!p12Bytes || !profileBytes || !ipaFile) throw new Error("اختر P12 وMobileProvision وIPA أولًا.");
-    if (!passwordInput.value) throw new Error("أدخل كلمة مرور ملف P12.");
+    await ensureWasm();
+    if (!p12Bytes || !provBytes || !ipaFile) throw new Error("اختر P12 وMobileProvision وIPA أولًا.");
+    if (!passwordInput.value) throw new Error("أدخل كلمة مرور P12.");
+    if (!ipaInfo) await inspectIPA(ipaFile);
 
-    log("جاري إنشاء محرك التوقيع والتحقق من الشهادة…");
-    const signer = new WasmSigner(p12Bytes, passwordInput.value, profileBytes);
+    const { files, appPrefix, plistData, executable, execPath, extensions } = ipaInfo;
+    if (extensions.length) throw new Error("IPA تحتوي App Extensions. هذه النسخة تمنع إنتاج IPA غير صالحة؛ استخدم Provisioning مستقلًا لكل Extension.");
+
+    log("جاري التحقق من الشهادة وملف Provisioning…");
+    const signer = new WasmSigner(p12Bytes, passwordInput.value, provBytes);
     const teamId = signer.team_id();
-    if (!teamId) throw new Error("تعذر استخراج Team ID من الشهادة/Provisioning.");
-    log(`تم التحقق من بيانات التوقيع • Team ID: ${teamId}`, "ok");
-    setProgress(12);
+    if (!teamId) throw new Error("تعذر استخراج Team ID. تحقق من P12 وProvisioning وكلمة المرور.");
+    log(`بيانات التوقيع صالحة • Team ID: ${teamId}`, "ok");
+    progress(12);
 
-    if (!ipaInfo) await inspectIpa(ipaFile);
-    const { files, appPrefix, plistPath, infoPlist, info, executable, execPath, nestedApps } = ipaInfo;
-    if (nestedApps.length) {
-      throw new Error("هذه IPA تحتوي App Extensions. يجب توقيع كل Extension بملف Provisioning مطابق له قبل إنشاء IPA صالحة.");
+    const bundleId = $("#bundleId").value.trim() || ipaInfo.bundleId;
+    const output = { ...files };
+
+    for (const path of Object.keys(output)) {
+      if (path.startsWith(`${appPrefix}_CodeSignature/`)) delete output[path];
     }
-
-    const requestedBundleId = $("#bundleId").value.trim() || ipaInfo.bundleId;
-    if (!requestedBundleId) throw new Error("Bundle ID غير موجود.");
-
-    const outputFiles = { ...files };
-    for (const path of Object.keys(outputFiles)) {
-      if (path.startsWith(`${appPrefix}_CodeSignature/`)) delete outputFiles[path];
-    }
-
-    // Use the selected provisioning profile inside the resulting app.
-    outputFiles[`${appPrefix}embedded.mobileprovision`] = profileBytes;
+    output[`${appPrefix}embedded.mobileprovision`] = provBytes;
     signer.set_main_executable(executable);
 
-    // Sign nested Mach-O frameworks/dylibs first. The main executable is signed last.
-    const nestedMachO = [];
+    const nested = [];
     for (const [path, data] of Object.entries(files)) {
-      if (!path.startsWith(appPrefix) || path === execPath || path.startsWith(`${appPrefix}_CodeSignature/`)) continue;
-      if (path.endsWith("/embedded.mobileprovision") || path.endsWith("/Info.plist")) continue;
-      if (isMachO(data)) nestedMachO.push(path);
+      if (!path.startsWith(appPrefix) || path === execPath) continue;
+      if (path.startsWith(`${appPrefix}_CodeSignature/`)) continue;
+      if (path.endsWith("/Info.plist") || path.endsWith("/embedded.mobileprovision")) continue;
+      if (isMachO(data)) nested.push(path);
     }
 
-    setProgress(20);
-    if (nestedMachO.length) {
-      log(`جاري توقيع ${nestedMachO.length} ملف Framework/Dylib…`);
-      for (let index = 0; index < nestedMachO.length; index++) {
-        const path = nestedMachO[index];
-        const data = files[path];
+    if (nested.length) {
+      log(`جاري توقيع ${nested.length} ملفًا داخليًا…`);
+      for (let i = 0; i < nested.length; i++) {
+        const path = nested[i];
         const leaf = path.split("/").pop();
         const identifier = leaf.replace(/\.dylib$/i, "");
         try {
-          outputFiles[path] = signer.sign_macho_fat(data, identifier, null, null);
+          output[path] = signer.sign_macho_fat(files[path], identifier, null, null);
         } catch (error) {
           throw new Error(`فشل توقيع ${path}: ${error?.message || error}`);
         }
-        setProgress(20 + ((index + 1) / nestedMachO.length) * 25);
+        progress(15 + ((i + 1) / nested.length) * 30);
       }
     }
 
-    // Hash the exact final resource bytes, including the selected profile.
-    log("جاري بناء CodeResources…");
-    let hashed = 0;
-    const totalResourceFiles = Object.keys(outputFiles).filter((path) =>
-      path.startsWith(appPrefix) &&
-      !path.startsWith(`${appPrefix}_CodeSignature/`) &&
-      path !== execPath &&
-    ).length;
-
-    for (const [path, data] of Object.entries(outputFiles)) {
-      if (!path.startsWith(appPrefix)) continue;
-      const relative = path.slice(appPrefix.length);
-      if (!relative || relative.startsWith("_CodeSignature/")) continue;
-      if (path === execPath) continue;
-      signer.hash_file(relative, data);
-      hashed++;
-      if (hashed % 25 === 0) setProgress(45 + Math.min(25, (hashed / Math.max(totalResourceFiles, 1)) * 25));
+    log("جاري حساب CodeResources من الملفات النهائية…");
+    const resources = Object.keys(output).filter((path) => {
+      if (!path.startsWith(appPrefix)) return false;
+      if (path === execPath) return false;
+      if (path.startsWith(`${appPrefix}_CodeSignature/`)) return false;
+      return true;
+    });
+    for (let i = 0; i < resources.length; i++) {
+      const path = resources[i];
+      signer.hash_file(path.slice(appPrefix.length), output[path]);
+      if (i % 20 === 0) progress(45 + (i / Math.max(resources.length, 1)) * 18);
     }
 
     const codeResources = signer.build_code_resources();
-    outputFiles[`${appPrefix}_CodeSignature/CodeResources`] = codeResources;
-    setProgress(73);
+    output[`${appPrefix}_CodeSignature/CodeResources`] = codeResources;
+    progress(68);
 
-    // Sign the main executable using the final Info.plist and CodeResources.
     log("جاري توقيع الملف التنفيذي الرئيسي…");
-    outputFiles[execPath] = signer.sign_macho_fat(
-      files[execPath],
-      requestedBundleId,
-      infoPlist,
-      codeResources,
-    );
-    setProgress(86);
+    output[execPath] = signer.sign_macho_fat(output[execPath], bundleId, plistData, codeResources);
+    progress(82);
 
-    const ipaBytes = zipSync(outputFiles, { level: 6 });
-    const blob = new Blob([ipaBytes], { type: "application/octet-stream" });
-    outputUrl = URL.createObjectURL(blob);
-
-    const requestedName = $("#outputName").value.trim() || "signed.ipa";
-    const outputName = requestedName.replace(/\.ipa$/i, "") + ".ipa";
-    downloadLink.href = outputUrl;
-    downloadLink.download = outputName;
-    downloadLink.textContent = `تنزيل ${outputName} • ${formatSize(ipaBytes.length)}`;
-    downloadLink.classList.remove("hidden");
-
-    setProgress(100);
-    log("اكتمل التوقيع محليًا بنجاح. لم يتم رفع P12 أو Provisioning أو IPA إلى أي خادم.", "ok");
+    log("جاري إنشاء IPA النهائية…");
+    const archive = zipSync(output, { level: 6 });
+    outputUrl = URL.createObjectURL(new Blob([archive], { type: "application/octet-stream" }));
+    const baseName = ($( "#outputName")?.value.trim() || `${ipaFile.name.replace(/\.ipa$/i, "")}-signed`).replace(/\.ipa$/i, "");
+    download.href = outputUrl;
+    download.download = `${baseName}.ipa`;
+    download.textContent = `تنزيل ${baseName}.ipa • ${size(archive.length)}`;
+    download.classList.remove("hidden");
+    progress(100);
+    log("اكتمل التوقيع بنجاح. لم يتم رفع P12 أو Provisioning أو IPA إلى خادم.", "ok");
   } catch (error) {
     console.error(error);
-    setProgress(0);
+    progress(0);
     log(`فشل التوقيع: ${error?.message || error}`, "error");
   } finally {
-    updateReadiness();
+    refreshButton();
   }
 });
 
-window.addEventListener("beforeunload", () => {
-  if (outputUrl) URL.revokeObjectURL(outputUrl);
-});
-
-initWasm().catch(() => {});
-updateReadiness();
+ensureWasm().catch(() => refreshButton());

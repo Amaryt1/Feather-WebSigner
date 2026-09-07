@@ -1,1 +1,61 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#07111f"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0"><title>Feather WebSigner</title><link rel="stylesheet" href="./src/style.css?v=2026090712"><link rel="icon" href="data:,"></head><body><div class="bg"></div><header class="top"><div class="brand"><span class="logo">✦</span><div><b>Feather WebSigner</b><small>توقيع محلي داخل المتصفح</small></div></div><span class="privacy">🔒 الملفات لا تُرفع إلى خادم</span></header><main><section class="hero"><div><span class="pill">WASM • Local Signing</span><h1>وقّع ملفات IPA من المتصفح</h1><p>الشهادة والـProvisioning والـIPA تبقى داخل جهازك، ويُنفَّذ محرك التوقيع عبر WebAssembly.</p></div><div class="status" id="engineStatus">جاري تحميل محرك التوقيع…</div></section><section class="grid"><article class="card"><h2>1. شهادة P12</h2><label class="drop"><input id="p12" type="file" accept=".p12,.pfx"><span>اختر ملف P12</span><small id="p12name">لم يتم اختيار ملف</small></label><input id="password" type="password" placeholder="كلمة مرور P12"></article><article class="card"><h2>2. MobileProvision</h2><label class="drop"><input id="prov" type="file" accept=".mobileprovision"><span>اختر ملف MobileProvision</span><small id="provname">لم يتم اختيار ملف</small></label><div class="meta" id="provMeta">ستظهر بيانات الملف هنا.</div></article><article class="card wide"><h2>3. IPA</h2><label class="drop big"><input id="ipa" type="file" accept=".ipa"><span>اختر ملف IPA المراد توقيعه</span><small id="ipaname">لم يتم اختيار ملف</small></label><div class="options"><label>Bundle ID <input id="bundleId" placeholder="يُقرأ تلقائيًا من IPA" readonly></label><label>اسم الناتج <input id="outputName" value="signed.ipa"></label></div><button id="sign" disabled>بدء التوقيع محليًا</button><div class="progress"><i id="bar"></i></div><div id="log" class="log">جاهز.</div><a id="download" class="download hidden">تنزيل IPA الموقعة</a></article></section><section class="card notes"><h2>ملاحظات مهمة</h2><ul><li>استخدم فقط شهادات وملفات provisioning المملوكة لك أو المصرح لك باستخدامها.</li><li>نجاح التوقيع لا يعني تجاوز قيود Apple؛ يجب أن يكون الـProvision مناسبًا للجهاز والـBundle ID.</li><li>التثبيت المباشر عبر <code>itms-services</code> يحتاج ملف manifest مستضافًا عبر HTTPS.</li></ul></section></main><script>(function(){function bind(id,labelId){var input=document.getElementById(id),label=document.getElementById(labelId);if(!input||!label)return;function show(){var f=input.files&&input.files[0];if(f){var n=f.name,s=f.size<1024?f.size+' B':f.size<1048576?(f.size/1024).toFixed(1)+' KB':(f.size/1048576).toFixed(1)+' MB';label.textContent=n+' • '+s;label.dataset.selected='1';}}input.addEventListener('change',show,false);input.addEventListener('input',show,false);show();}bind('p12','p12name');bind('prov','provname');bind('ipa','ipaname');window.addEventListener('error',function(e){var s=document.getElementById('engineStatus');if(s&&/main\.js|zsign|wasm/i.test((e.message||'')+' '+(e.filename||''))){s.textContent='تعذر تشغيل محرك التوقيع — اختيار الملفات متاح';s.dataset.state='error';}});})();</script><script type="module" src="./src/main.js?v=2026090712"></script></body></html>
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07111f"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">
+<title>Feather WebSigner</title><link rel="stylesheet" href="./src/style.css?v=2026090715"><link rel="icon" href="data:,">
+</head>
+<body>
+<div class="bg"></div>
+<div id="toastHost" class="toast-host" aria-live="polite"></div>
+<div id="fileLoader" class="file-loader hidden" aria-hidden="true"><div class="loader-ring"><span></span></div><b id="loaderText">جاري تحميل الملف…</b></div>
+<header class="top"><div class="brand"><span class="logo">✦</span><div><b>Feather WebSigner</b><small>توقيع محلي داخل المتصفح</small></div></div><span class="privacy">🔒 الملفات لا تُرفع إلى خادم</span></header>
+<main>
+<section class="hero"><div><span class="pill">WASM • Local Signing</span><h1>وقّع ملفات IPA من المتصفح</h1><p>الشهادة والـProvisioning والـIPA تبقى داخل جهازك، ويُنفَّذ محرك التوقيع عبر WebAssembly.</p></div><div class="status" id="engineStatus">جاري تحميل محرك التوقيع…</div></section>
+<section class="grid">
+<article class="card">
+<h2>1. شهادة P12</h2>
+<label class="drop"><input id="p12" type="file" accept=".p12,.pfx"><span>اختر ملف P12</span><small id="p12name">لم يتم اختيار ملف</small></label>
+<input id="password" type="password" placeholder="كلمة مرور P12">
+<div class="meta" id="p12Meta">لم يتم تحميل الشهادة بعد.</div>
+</article>
+<article class="card">
+<h2>2. MobileProvision</h2>
+<label class="drop"><input id="prov" type="file" accept=".mobileprovision"><span>اختر ملف MobileProvision</span><small id="provname">لم يتم اختيار ملف</small></label>
+<div class="meta" id="provMeta">ستظهر بيانات الملف هنا.</div>
+</article>
+<article class="card wide">
+<h2>3. IPA</h2>
+<label class="drop big"><input id="ipa" type="file" accept=".ipa"><span>اختر ملف IPA المراد توقيعه</span><small id="ipaname">لم يتم اختيار ملف</small></label>
+<div class="bundle-box">
+<div class="bundle-title">بيانات الحزمة Bundle</div>
+<div class="bundle-grid">
+<label>Bundle ID<input id="bundleId" placeholder="يُقرأ تلقائيًا من IPA" readonly></label>
+<label>اسم الحزمة<input id="bundleName" placeholder="يُقرأ تلقائيًا من IPA" readonly></label>
+<label>الملف التنفيذي<input id="executableName" placeholder="يُقرأ تلقائيًا من IPA" readonly></label>
+<label>اسم العرض<input id="displayName" placeholder="يُقرأ تلقائيًا من IPA" readonly></label>
+</div></div>
+<div class="options"><label>اسم الناتج<input id="outputName" value="signed.ipa"></label></div>
+<button id="sign" disabled>بدء التوقيع محليًا</button>
+<div class="progress"><i id="bar"></i></div>
+<div id="log" class="log">جاهز.</div>
+<a id="download" class="download hidden">تنزيل IPA الموقعة</a>
+<div class="install-box">
+<div class="install-title">التثبيت على iPhone / iPad</div>
+<p>للتثبيت المباشر يجب توفير رابط HTTPS لملف Manifest أو رابط <code>itms-services://</code> صالح.</p>
+<input id="installUrl" type="url" placeholder="https://example.com/manifest.plist أو itms-services://…">
+<button id="install" class="install-btn" disabled>تثبيت التطبيق</button>
+</div>
+</article>
+</section>
+<section class="card notes"><h2>ملاحظات مهمة</h2><ul><li>الملفات تبقى محليًا داخل المتصفح ولا يتم رفع P12 أو MobileProvision أو IPA إلى GitHub أو خادم التوقيع.</li><li>نجاح التوقيع لا يعني تجاوز قيود Apple؛ يجب أن يكون الـProvision مناسبًا للجهاز والـBundle ID.</li><li>التثبيت المباشر عبر <code>itms-services</code> يحتاج Manifest مستضافًا عبر HTTPS.</li></ul></section>
+</main>
+<script>
+(function(){
+function size(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB'}
+function bind(id,labelId){var input=document.getElementById(id),label=document.getElementById(labelId);if(!input||!label)return;function show(){var f=input.files&&input.files[0];if(f){label.textContent=f.name+' • '+size(f.size);label.dataset.selected='1'}}input.addEventListener('change',show,false);input.addEventListener('input',show,false);show()}
+bind('p12','p12name');bind('prov','provname');bind('ipa','ipaname');
+})();
+</script>
+<script type="module" src="./src/main.js?v=2026090715"></script>
+</body></html>
